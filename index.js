@@ -70,11 +70,11 @@ client.on('messageCreate', async message => {
             return;
         }
         let msg = '🏆 الترتيب:\n';
-        sorted.slice(0, 5).forEach(async ([userId, score]) => {
+        for (const [userId, score] of sorted.slice(0, 5)) {
             const user = await client.users.fetch(userId);
             msg += ${user.username}: ${score} نقطة\n;
-        });
-        setTimeout(() => message.channel.send(msg), 500);
+        }
+        message.channel.send(msg);
     }
 
     if (command === '!ايموجي') {
@@ -102,8 +102,12 @@ client.on('messageCreate', async message => {
         const roles = ['مافيا', 'شرطي', 'مدني', 'مدني'];
         const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
         const selected = players.sort(() => 0.5 - Math.random()).slice(0, roles.length);
-        selected.forEach((player, i) => {
-            player.send(دورك في المافيا: ${roles[i]}).catch(() => message.channel.send(لا يمكن إرسال خاص لـ ${player}));
+        selected.forEach(async (player, i) => {
+            try {
+                await player.send(دورك في المافيا: ${roles[i]});
+            } catch {
+                message.channel.send(لا يمكن إرسال خاص لـ ${player});
+            }
         });
         message.channel.send('تم توزيع الأدوار!');
     }
@@ -160,10 +164,10 @@ client.on('messageCreate', async message => {
         if (!role) {
             role = await message.guild.roles.create({ name: roleName });
         }
-        message.member.roles.add(role);
+        await message.member.roles.add(role);
         points.set(message.author.id, userPoints - 90);
         message.channel.send(${message.author} مبروك! حصلت على رول **${roleName}** وتم خصم 90 نقطة!);
     }
 });
-const token = process.env.DISCORD_TOKEN;
-client.login(token);
+
+client.login(process.env.DISCORD_TOKEN);
