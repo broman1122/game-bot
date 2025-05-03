@@ -1,210 +1,209 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  AttachmentBuilder,
+  EmbedBuilder
+} = require('discord.js');
+const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
 
+const token = process.env.TOKEN || ''; // för Render
+const quiz = JSON.parse(fs.readFileSync('quiz.json', 'utf8'));
+let points = fs.existsSync('points.json') ? JSON.parse(fs.readFileSync('points.json', 'utf8')) : {};
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const token = process.env.DISCORD_TOKEN;
-
-let playerPoints = {};
 let gameActive = false;
 let players = [];
 let playerHearts = {};
 let currentPlayerIndex = 0;
+const maxPlayers = 15;
 const minPlayers = 3;
-let guessingGameActive = false;
 
 client.once('ready', () => {
-  console.log(تم تسجيل الدخول باسم ${client.user.tag});
+  console.log(`✅ Inloggad som ${client.user.tag}`);
 });
 
-// === Help Command ===
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
+  // 🆘 Hjälpkommando
   if (message.content === '-مساعدة') {
-    const helpEmbed = new EmbedBuilder()
-      .setTitle('🕹️ قائمة الألعاب')
-      .setDescription('استخدم الأوامر التالية للعب:')
-      .addFields(
-        { name: '💣 لعبة القنبلة', value: '-بومب' },
-        { name: '⌨️ الكتابة السريعة', value: '-كتابة' },
-        { name: '🔤 حروف', value: '-حروف' },
-        { name: '🎭 صراحة أم تحدي', value: '-صراحة' },
-        { name: '🕵️ من كتب هذه الرسالة؟', value: '-من_كتب' },
-        { name: '🧩 لعبة الإيموجي', value: '-إيموجي' },
-        { name: '🎰 روليت', value: '-روليت' },
-        { name: '🕵️‍♂️ مافيا', value: '-مافيا' },
-        { name: '💸 المتجر (شراء رتبة)', value: '-متجر' },
-        { name: '💎 نقاطي', value: '-نقاطي' },
-        { name: '🎯 لعبة الأرقام', value: '-أرقام' }
-      )
-      .setColor(0x00FFFF)
-      .setFooter({ text: 'استمتع باللعب!' });
-
-    await message.channel.send({ embeds: [helpEmbed] });
+    return message.channel.send(`
+📜 **الأوامر المتاحة:**
+\`-بومب\` ➤ لبدء لعبة القنبلة
+\`-ايقاف\` ➤ لإيقاف اللعبة الحالية
+\`-النقاط\` ➤ لعرض نقاطك
+\`-مافيا\` ➤ (قريبًا)
+    `);
   }
 
-  // نقاطي
-  if (message.content === '-نقاطي') {
-    const points = playerPoints[message.author.id] || 0;
-    await message.channel.send(📊 نقاطك هي: ${points});
+  // 📊 Poängvisning
+  if (message.content === '-النقاط') {
+    const userPoints = points[message.author.id] || 0;
+    return message.channel.send(`🎯 نقاطك: ${userPoints}`);
   }
 
-  // لعبة القنبلة
+  // 🚫 Stoppa spelet
+  if (message.content === '-ايقاف' && gameActive) {
+    gameActive = false;
+    players = [];
+    playerHearts = {};
+    currentPlayerIndex = 0;
+    return message.channel.send('❌ تم إيقاف اللعبة.');
+  }
+
+  // 💣 Starta bombspelet
   if (message.content === '-بومب' && !gameActive) {
     gameActive = true;
     players = [];
     playerHearts = {};
 
-    const joinBtn = new ButtonBuilder()
-      .setCustomId('join')
-      .setLabel('انضم')
+    const joinButton = new ButtonBuilder()
+      .setCustomId('join_bomb_game')
+      .setLabel('انضم للعبة')
       .setStyle(ButtonStyle.Success);
-
-    const leaveBtn = new ButtonBuilder()
-      .setCustomId('leave')
-      .setLabel('غادر')
+    const leaveButton = new ButtonBuilder()
+      .setCustomId('leave_bomb_game')
+      .setLabel('غادر اللعبة')
       .setStyle(ButtonStyle.Danger);
+    const row = new ActionRowBuilder().addComponents(joinButton, leaveButton);
 
-    const row = new ActionRowBuilder().addComponents(joinBtn, leaveBtn);
     const embed = new EmbedBuilder()
-      .setTitle('💣 لعبة القنبلة بدأت!')
-      .setDescription('اضغط على زر الانضمام خلال 30 ثانية.')
-      .setColor(0xFF0000);
+      .setTitle('🎮 بدء اللعبة!')
+      .setDescription('انقر على الأزرار للانضمام أو مغادرة اللعبة.')
+      .setColor(0x00FF00)
+      .addFields({ name: 'اللاعبين', value: 'لا يوجد لاعبون بعد', inline: true })
+      .setFooter({ text: '⏳ الرجاء الانضمام خلال 30 ثانية' });
 
-    const msg = await message.channel.send({ embeds: [embed], components: [row] });
+    const gameMessage = await message.channel.send({ embeds: [embed], components: [row] });
 
-    const collector = msg.createMessageComponentCollector({ time: 30000 });
+    const filter = i => ['join_bomb_game', 'leave_bomb_game'].includes(i.customId);
+    const collector = gameMessage.createMessageComponentCollector({ filter, time: 30000 });
 
-    collector.on('collect', async i => {
-      if (i.customId === 'join') {
-        if (!players.includes(i.user.id)) {
-          players.push(i.user.id);
-          playerHearts[i.user.id] = 2;
-          await i.reply({ content: ✅ ${i.user.username} انضم, ephemeral: true });
-        } else {
-          await i.reply({ content: '❗ أنت بالفعل منضم', ephemeral: true });
+    collector.on('collect', async interaction => {
+      if (!gameActive) return await interaction.reply({ content: '❗ اللعبة انتهت.', ephemeral: true });
+
+      if (interaction.customId === 'join_bomb_game') {
+        if (!players.includes(interaction.user.id) && players.length < maxPlayers) {
+          players.push(interaction.user.id);
+          playerHearts[interaction.user.id] = 2;
         }
-      } else if (i.customId === 'leave') {
-        players = players.filter(p => p !== i.user.id);
-        delete playerHearts[i.user.id];
-        await i.reply({ content: '❌ غادرت اللعبة', ephemeral: true });
+      } else {
+        players = players.filter(id => id !== interaction.user.id);
+        delete playerHearts[interaction.user.id];
       }
+
+      const playerMentions = players.map(id => `<@${id}>`).join(', ') || 'لا يوجد لاعبون بعد';
+      embed.spliceFields(0, 1, {
+        name: 'اللاعبين',
+        value: `${playerMentions}\nعدد اللاعبين: ${players.length}/${maxPlayers}`,
+        inline: true
+      });
+
+      await gameMessage.edit({ embeds: [embed] });
+      await interaction.reply({ content: '✅ تم التحديث.', ephemeral: true });
     });
 
     collector.on('end', async () => {
       if (players.length >= minPlayers) {
-        await message.channel.send('🚀 اللعبة تبدأ الآن!');
-        // هنا يمكن إضافة منطق اللعب و تحديد الفائز
-        // عند الفوز، إضافة نقطة للفائز
-        const winner = players[Math.floor(Math.random() * players.length)];
-        playerPoints[winner] = (playerPoints[winner] || 0) + 1; // إضافة نقطة للفائز
-        await message.channel.send(<@${winner}> فاز في لعبة القنبلة! حصل على نقطة.);
-        gameActive = false;
+        await message.channel.send({
+          embeds: [new EmbedBuilder()
+            .setTitle('🚀 اللعبة ستبدأ قريباً!')
+            .setDescription('🕐 ستبدأ اللعبة خلال 10 ثواني...')
+            .setColor(0xFF0000)]
+        });
+        setTimeout(() => startGame(message.channel), 10000);
       } else {
         gameActive = false;
-        await message.channel.send('❌ تم إلغاء اللعبة لعدم وجود عدد كافٍ من اللاعبين.');
+        await message.channel.send('❌ تم إلغاء اللعبة، عدد اللاعبين غير كافي.');
       }
     });
-  }
-
-  // لعبة الإيموجي
-  if (message.content === '-إيموجي') {
-    const emojis = ['😀', '😂', '😎', '😍', '😢', '😡', '😱', '🤔'];
-    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-    await message.channel.send(🧩 حدد الإيموجي: ${randomEmoji});
-
-    const filter = msg => msg.content === randomEmoji && !msg.author.bot;
-    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
-
-    collector.on('collect', msg => {
-      playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1; // إضافة نقطة عند الفوز
-      msg.reply('✅ أحسنت في اختيار الإيموجي!');
-      collector.stop();
-    });
-
-    collector.on('end', c => {
-      if (c.size === 0) message.channel.send('⌛ انتهى الوقت دون أن يجيب أحد.');
-    });
-  }
-
-  // شراء رتبة
-  if (message.content === '-متجر') {
-    const points = playerPoints[message.author.id] || 0;
-
-    if (points >= 90) {
-      // هنا يمكنك إضافة كود لمنح اللاعب رتبة معينة في السيرفر
-      playerPoints[message.author.id] -= 90;
-      await message.channel.send(🎉 تم شراء الرتبة بنجاح! لديك الآن ${playerPoints[message.author.id]} نقطة.);
-    } else {
-      await message.channel.send(❌ لديك ${points} نقطة، تحتاج إلى 90 نقطة لشراء الرتبة.);
-    }
-  }
-
-  // روليت
-  if (message.content === '-روليت') {
-    const outcomes = ['💰 فزت بـ 50 نقطة!', '🎉 فزت بـ 100 نقطة!', '❌ خسرنا! حاول مجددًا!', '💸 فزت بـ 200 نقطة!'];
-    const randomOutcome = outcomes[Math.floor(Math.random() * outcomes.length)];
-
-    if (randomOutcome.includes('فزت')) {
-      const pointsToAdd = parseInt(randomOutcome.split(' ')[2]);
-      playerPoints[message.author.id] = (playerPoints[message.author.id] || 0) + pointsToAdd; // إضافة نقاط عند الفوز
-    }
-
-    await message.channel.send(randomOutcome);
-  }
-
-  // لعبة الأرقام
-  if (message.content === '-أرقام' && !guessingGameActive) {
-    guessingGameActive = true;
-    const randomNumber = Math.floor(Math.random() * 100) + 1; // رقم عشوائي من 1 إلى 100
-
-    const filter = msg => !msg.author.bot && !isNaN(msg.content) && parseInt(msg.content) >= 1 && parseInt(msg.content) <= 100;
-
-    await message.channel.send('🎯 لعبة الأرقام بدأت! حدد رقم بين 1 و 100!');
-    
-    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
-
-    collector.on('collect', msg => {
-      const guess = parseInt(msg.content);
-      if (guess === randomNumber) {
-        playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1; // إضافة نقطة عند الفوز
-        msg.reply(🎉 أحسنت! الرقم كان ${randomNumber}! حصلت على نقطة.);
-        collector.stop();
-      }
-    });
-
-    collector.on('end', c => {
-      if (c.size === 0) {
-        message.channel.send('⌛ انتهى الوقت دون أن يخمن أحد الرقم.');
-      }
-      guessingGameActive = false;
-    });
-  }
-
-  // مافيا
-  if (message.content === '-مافيا') {
-    const roles = ['مافيا', 'ضحية', 'محقق'];
-    const playerRole = roles[Math.floor(Math.random() * roles.length)];
-    await message.channel.send(🎭 دورك في لعبة المافيا هو: ${playerRole});
-
-    // إذا كان اللاعب مافيا، يفوز ويحصل على نقطة
-    if (playerRole === 'مافيا') {
-      playerPoints[message.author.id] = (playerPoints[message.author.id] || 0) + 1; // إضافة نقطة للفائز
-      await message.channel.send(🎉 أنت المافيا وفزت في اللعبة! حصلت على نقطة.);
-    }
-  }
-
-  // من كتب
-  if (message.content === '-من_كتب') {
-    const members = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
-    const random = members[Math.floor(Math.random() * members.length)];
-    await message.channel.send(🤔 من كتب هذه الرسالة؟\n\n${random.username});
   }
 });
 
-// === Start Bot ===
-client.login(token);
+async function startGame(channel) {
+  if (players.length > 0) await askQuestion(channel);
+}
+
+async function askQuestion(channel) {
+  if (players.length === 1) {
+    const winner = players[0];
+    const winnerUser = await client.users.fetch(winner);
+
+    // 📈 Lägg till poäng
+    points[winner] = (points[winner] || 0) + 1;
+    fs.writeFileSync('points.json', JSON.stringify(points, null, 2));
+
+    const winnerEmbed = new EmbedBuilder()
+      .setTitle('🎉 لدينا فائز! 🎉')
+      .setDescription(`<@${winner}> هو الفائز!\nالقلوب المتبقية: ${playerHearts[winner]}\nالنقاط الكلية: ${points[winner]}`)
+      .setColor(0xFFD700)
+      .setThumbnail(winnerUser.displayAvatarURL({ dynamic: true }))
+      .setFooter({ text: 'jaBER sTUDIE', iconURL: channel.guild.iconURL({ dynamic: true }) });
+
+    await channel.send({ embeds: [winnerEmbed] });
+    gameActive = false;
+    return;
+  }
+
+  currentPlayerIndex = Math.floor(Math.random() * players.length);
+  const player = players[currentPlayerIndex];
+  const question = quiz[Math.floor(Math.random() * quiz.length)];
+  const user = await client.users.fetch(player);
+  const imageBuffer = await generateImage(question.partial, user.username);
+  const attachment = new AttachmentBuilder(imageBuffer, { name: 'question.png' });
+
+  await channel.send({ content: `<@${player}> اكمل الجملة:\n❤️ القلوب: ${playerHearts[player]}`, files: [attachment] });
+
+  const filter = m => m.author.id === player && m.content.toLowerCase() === question.complete.toLowerCase();
+  const collector = channel.createMessageCollector({ filter, time: 15000 });
+
+  collector.on('collect', async response => {
+    await response.reply('✅ صحيح! التالي...');
+    collector.stop();
+    await askQuestion(channel);
+  });
+
+  collector.on('end', async collected => {
+    if (!collected.size) {
+      playerHearts[player]--;
+      if (playerHearts[player] <= 0) {
+        await channel.send(`<@${player}> خسر كل القلوب وتم طرده.`);
+        players = players.filter(id => id !== player);
+        delete playerHearts[player];
+      } else {
+        await channel.send(`<@${player}> لم يجب وخسر قلب. القلوب المتبقية: ${playerHearts[player]}`);
+      }
+      await askQuestion(channel);
+    }
+  });
+}
+
+async function generateImage(partialText, playerName) {
+  const canvas = createCanvas(1024, 512);
+  const ctx = canvas.getContext('2d');
+  const background = await loadImage('./image.png');
+  ctx.drawImage(background, 0, 0, canvas.width, canvas.height);
+  ctx.font = 'bold 48px Arial';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textAlign = 'center';
+  ctx.fillText(partialText, 330, 320);
+  ctx.font = 'bold 36px Arial';
+  ctx.fillText(playerName, 850, 460);
+  return canvas.toBuffer();
+}
+
+client.login(token).catch(err => {
+  console.error('Login error:', err);
+  process.exit(1);
+});
+
+// Anti-crash
+process.on('unhandledRejection', (reason, p) => console.log('Unhandled Rejection:', reason));
+process.on('uncaughtException', (err, origin) => console.log('Uncaught Exception:', err))
