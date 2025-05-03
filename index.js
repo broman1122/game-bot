@@ -1,4 +1,6 @@
-const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
+require('dotenv').config();
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Partials } = require('discord.js');
+const fs = require('fs');
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -9,8 +11,16 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
-const points = new Map();
+const token = process.env.DISCORD_TOKEN;
 
+let playerPoints = new Map(); // Using Map for player points tracking
+let gameActive = false;
+let players = [];
+let playerHearts = {};
+let currentPlayerIndex = 0;
+const minPlayers = 3;
+
+// Emoji riddles and flags for games
 const emojiRiddles = [
     { emoji: '🍎📱', answer: 'ابل' },
     { emoji: '🎬🍿', answer: 'سينما' },
@@ -26,6 +36,7 @@ const flags = [
     { emoji: '🇫🇷', answer: 'فرنسا' },
 ];
 
+// Sentences for speed typing game
 const sentences = [
     'انا احب البرمجة',
     'ديسكورد ممتع',
@@ -37,11 +48,111 @@ client.once('ready', () => {
     console.log(تم تسجيل الدخول باسم ${client.user.tag});
 });
 
+// === Help Command ===
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     const args = message.content.trim().split(/ +/g);
     const command = args.shift().toLowerCase();
 
+    // Display help
+    if (command === '-مساعدة') {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle('🕹️ قائمة الألعاب')
+            .setDescription('استخدم الأوامر التالية للعب:')
+            .addFields(
+                { name: '💣 لعبة القنبلة', value: '-بومب' },
+                { name: '⌨️ الكتابة السريعة', value: '-كتابة' },
+                { name: '🔤 حروف', value: '-حروف' },
+                { name: '🎭 صراحة أم تحدي', value: '-صراحة' },
+                { name: '🕵️ من كتب هذه الرسالة؟', value: '-من_كتب' },
+                { name: '💎 نقاطي', value: '-نقاطي' },
+                { name: '!ترتيب', value: 'أفضل اللاعبين' },
+                { name: '!ايموجي', value: 'لعبة تخمين الإيموجي' },
+                { name: '!علم', value: 'احزر الدولة من العلم' },
+                { name: '!روليت', value: 'لعبة الروليت' },
+                { name: '!مافيا', value: 'لعبة المافيا' }
+            )
+            .setColor(0x00FFFF)
+            .setFooter({ text: 'استمتع باللعب!' });
+
+        await message.channel.send({ embeds: [helpEmbed] });
+    }
+
+    // Display user points
+    if (command === '-نقاطي') {
+        const points = playerPoints.get(message.author.id) || 0;
+        await message.channel.send(📊 نقاطك هي: ${points});
+    }
+
+    // === Emoji Riddle ===
+    if (command === '!ايموجي') {
+        const riddle = emojiRiddles[Math.floor(Math.random() * emojiRiddles.length)];
+        message.channel.send(❓ **لعبة الإيموجي:** خمن الكلمة!\n${riddle.emoji});
+
+        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === riddle.answer;
+        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
+            .then(collected => {
+                const winner = collected.first().author;
+                playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
+                message.channel.send(${winner} صحيح! نقطة!);
+            })
+            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${riddle.answer}));
+    }
+
+    // === Speed Typing ===
+    if (command === '-كتابة') {
+        const text = sentences[Math.floor(Math.random() * sentences.length)];
+        await message.channel.send(📝 اكتب هذا بأسرع ما يمكن:\n\n${text});
+
+        const filter = msg => msg.content === text && !msg.author.bot;
+        const collector = message.channel.createMessageCollector({ filter, time: 30000 });
+
+        collector.on('collect', msg => {
+            playerPoints.set(msg.author.id, (playerPoints.get(msg.author.id) || 0) + 1);
+            msg.reply('✅ أحسنت!');
+            collector.stop();
+        });
+
+        collector.on('end', c => {
+            if (c.size === 0) message.channel.send('⌛ لم يقم أحد بكتابة الجملة بشكل صحيح.');
+        });
+    }
+
+    // === Roulette Game ===
+    if (command === '!روليت') {
+        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
+        const winner = players[Math.floor(Math.random() * players.length)];
+        playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
+        message.channel.send(الروليت اختارت: ${winner}! نقطة!);
+    }
+
+    // === Mafia Game ===
+    if (command === '!مافيا') {
+        const roles = ['مافيا', 'شرطي', 'مدني', 'مدني'];
+        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
+        const selected = players.sort(() => 0.5 - Math.random()).slice(0, roles.length);
+        selected.forEach((player, i) => {
+            player.send(دورك في المافيا: ${roles[i]}).catch(() => message.channel.send(لا يمكن إرسال خاص لـ ${player}));
+        });
+        message.channel.send('تم توزيع الأدوار!');
+    }
+
+    // === Flag Guessing Game ===
+    if (command === '!علم') {
+        const flag = flags[Math.floor(Math.random() * flags.length)];
+        message.channel.send(🌍 **احزر الدولة:**\n${flag.emoji});
+
+        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === flag.answer;
+        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
+            .then(collected => {
+                const winner = collected.first().author;
+                playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
+                message.channel.send(${winner} صحيح! نقطة!);
+            })
+            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${flag.answer}));
+    }
+
+    // === Help Command ===
     if (command === '!مساعدة') {
         message.channel.send(`
 أوامر البوت:
@@ -58,13 +169,9 @@ client.on('messageCreate', async message => {
         `);
     }
 
-    if (command === '!نقاطي') {
-        const userPoints = points.get(message.author.id) || 0;
-        message.channel.send(${message.author} لديك ${userPoints} نقطة!);
-    }
-
+    // === Player Points Ranking ===
     if (command === '!ترتيب') {
-        const sorted = Array.from(points.entries()).sort((a, b) => b[1] - a[1]);
+        const sorted = Array.from(playerPoints.entries()).sort((a, b) => b[1] - a[1]);
         if (!sorted.length) {
             message.channel.send('لا توجد نقاط حتى الآن!');
             return;
@@ -76,94 +183,7 @@ client.on('messageCreate', async message => {
         }
         message.channel.send(msg);
     }
-
-    if (command === '!ايموجي') {
-        const riddle = emojiRiddles[Math.floor(Math.random() * emojiRiddles.length)];
-        message.channel.send(❓ **لعبة الإيموجي:** خمن الكلمة!\n${riddle.emoji});
-
-        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === riddle.answer;
-        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
-            .then(collected => {
-                const winner = collected.first().author;
-                points.set(winner.id, (points.get(winner.id) || 0) + 1);
-                message.channel.send(${winner} صحيح! نقطة!);
-            })
-            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${riddle.answer}));
-    }
-
-    if (command === '!روليت') {
-        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
-        const winner = players[Math.floor(Math.random() * players.length)];
-        points.set(winner.id, (points.get(winner.id) || 0) + 1);
-        message.channel.send(الروليت اختارت: ${winner}! نقطة!);
-    }
-
-    if (command === '!مافيا') {
-        const roles = ['مافيا', 'شرطي', 'مدني', 'مدني'];
-        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
-        const selected = players.sort(() => 0.5 - Math.random()).slice(0, roles.length);
-        selected.forEach((player, i) => {
-            player.send(دورك في المافيا: ${roles[i]}).catch(() => message.channel.send(لا يمكن إرسال خاص لـ ${player}));
-        });
-        message.channel.send('تم توزيع الأدوار!');
-    }
-
-    if (command === '!علم') {
-        const flag = flags[Math.floor(Math.random() * flags.length)];
-        message.channel.send(🌍 **احزر الدولة:**\n${flag.emoji});
-
-        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === flag.answer;
-        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
-            .then(collected => {
-                const winner = collected.first().author;
-                points.set(winner.id, (points.get(winner.id) || 0) + 1);
-                message.channel.send(${winner} صحيح! نقطة!);
-            })
-            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${flag.answer}));
-    }
-
-    if (command === '!سريع') {
-        const sentence = sentences[Math.floor(Math.random() * sentences.length)];
-        message.channel.send(⚡ اكتب الجملة بسرعة:\n\${sentence}\``);
-
-        const filter = m => m.channel.id === message.channel.id && m.content === sentence;
-        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
-            .then(collected => {
-                const winner = collected.first().author;
-                points.set(winner.id, (points.get(winner.id) || 0) + 1);
-                message.channel.send(${winner} أسرع شخص! نقطة!);
-            })
-            .catch(() => message.channel.send('انتهى الوقت! ولا أحد كتبها.'));
-    }
-
-    if (command === '!احسب') {
-        const text = args.join(' ').replace(/ /g, '');
-        message.channel.send(🔢 عدد الأحرف: ${text.length});
-    }
-
-    if (command === '!متجر') {
-        message.channel.send(`
-🛍️ *المتجر:*
-- شراء رول خاص: 90 نقطة
-اكتب الأمر \!شراء\ لشراء الرول إذا عندك نقاط كافية!
-        `);
-    }
-
-    if (command === '!شراء') {
-        const userPoints = points.get(message.author.id) || 0;
-        const roleName = 'VIP';
-        if (userPoints < 90) {
-            message.channel.send(${message.author} تحتاج 90 نقطة! نقاطك الحالية: ${userPoints});
-            return;
-        }
-        let role = message.guild.roles.cache.find(r => r.name === roleName);
-        if (!role) {
-            role = await message.guild.roles.create({ name: roleName });
-        }
-        message.member.roles.add(role);
-        points.set(message.author.id, userPoints - 90);
-        message.channel.send(${message.author} مبروك! حصلت على رول **${roleName}** وتم خصم 90 نقطة!);
-    }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// === Start Bot ===
+client.login(token);
