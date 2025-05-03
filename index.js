@@ -1,83 +1,184 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+import discord
+from discord.ext import commands
+import random
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
-});
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+intents.guilds = True
+intents.members = True
 
-const TRUTH_QUESTIONS = [
-  'ما هو أكبر سر لك؟',
-  'هل تحب شخصاً؟',
-  'ما هو أكثر شيء تخاف منه؟',
-  'هل سبق أن كذبت على صديقك المقرب؟',
-  'من هو الشخص الذي تعجب به؟',
-  'هل سبق أن فعلت شيئاً غير قانوني؟'
-];
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-const DARES = [
-  'غيّر اسمك لمدة ساعة',
-  'أرسل رسالة غريبة في الشات',
-  'قل شيئاً مضحكاً الآن',
-  'اطلب من عضو اختيار تحدي لك',
-  'قل الحقيقة لآخر من كتب في الشات'
-];
+points = {}
 
-client.once('ready', () => {
-  console.log(`${client.user.tag} جاهز للعمل!`);
-});
+emoji_riddles = [
+    {"emoji": "🍎📱", "answer": "ابل"},
+    {"emoji": "🎬🍿", "answer": "سينما"},
+    {"emoji": "🚗💨", "answer": "سيارة"},
+    {"emoji": "🐍💻", "answer": "بايثون"},
+    {"emoji": "☕💻", "answer": "قهوة"},
+]
 
-client.on('messageCreate', async message => {
-  if (message.content === '-صراحة') {
-    const row = new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder()
-          .setCustomId('truth')
-          .setLabel('🎭 صراحة')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('dare')
-          .setLabel('🎭 تحدي')
-          .setStyle(ButtonStyle.Danger)
-      );
+flags = [
+    {"emoji": "🇸🇦", "answer": "السعودية"},
+    {"emoji": "🇪🇬", "answer": "مصر"},
+    {"emoji": "🇯🇵", "answer": "اليابان"},
+    {"emoji": "🇫🇷", "answer": "فرنسا"},
+]
 
-    const embed = new EmbedBuilder()
-      .setTitle('🎭 لعبة صراحة أو تحدي')
-      .setDescription('اختر أحد الخيارين بالضغط على الزر المناسب:')
-      .setColor(0xF39C12);
+sentences = [
+    "انا احب البرمجة",
+    "ديسكورد ممتع",
+    "مرحبا بكم في السيرفر",
+    "اللعب مع الاصدقاء ممتع"
+]
 
-    const sentMessage = await message.channel.send({ embeds: [embed], components: [row] });
+@bot.event
+async def on_ready():
+    print(f"تم تسجيل الدخول باسم {bot.user}")
 
-    const collector = sentMessage.createMessageComponentCollector({ time: 30000 });
+@bot.command()
+async def مساعدة(ctx):
+    help_text = """
+أوامر البوت:
+!نقاطي → اعرف نقاطك
+!ترتيب → أفضل اللاعبين
+!ايموجي → لعبة تخمين الإيموجي
+!روليت → لعبة الروليت (اختيار عشوائي للفائز)
+!مافيا → توزيع أدوار المافيا
+!علم → احزر اسم الدولة من العلم
+!سريع → اكتب الجملة بسرعة
+!احسب → عد الأحرف في الجملة
+!متجر → فتح المتجر
+!شراء → شراء رول خاص
+"""
+    await ctx.send(help_text)
 
-    collector.on('collect', async interaction => {
-      if (interaction.user.id !== message.author.id) {
-        return interaction.reply({ content: '❌ هذه اللعبة ليست لك!', ephemeral: true });
-      }
+@bot.command()
+async def نقاطي(ctx):
+    user = str(ctx.author.id)
+    user_points = points.get(user, 0)
+    await ctx.send(f"{ctx.author.mention} لديك {user_points} نقطة!")
 
-      let result;
-      if (interaction.customId === 'truth') {
-        const question = TRUTH_QUESTIONS[Math.floor(Math.random() * TRUTH_QUESTIONS.length)];
-        result = new EmbedBuilder()
-          .setTitle('🎭 صراحة')
-          .setDescription(question)
-          .setColor(0x3498DB);
-      } else if (interaction.customId === 'dare') {
-        const dare = DARES[Math.floor(Math.random() * DARES.length)];
-        result = new EmbedBuilder()
-          .setTitle('🎭 تحدي')
-          .setDescription(dare)
-          .setColor(0xE74C3C);
-      }
+@bot.command()
+async def ترتيب(ctx):
+    if not points:
+        await ctx.send("لا توجد نقاط حتى الآن!")
+        return
+    sorted_points = sorted(points.items(), key=lambda x: x[1], reverse=True)
+    msg = "🏆 الترتيب:\n"
+    for user_id, score in sorted_points[:5]:
+        user = await bot.fetch_user(int(user_id))
+        msg += f"{user.name}: {score} نقطة\n"
+    await ctx.send(msg)
 
-      await interaction.update({ embeds: [result], components: [] });
-      collector.stop();
-    });
+@bot.command()
+async def ايموجي(ctx):
+    await ctx.send("❓ *لعبة الإيموجي:* خمن الكلمة من الإيموجي المرسوم!")
+    riddle = random.choice(emoji_riddles)
+    answer = riddle["answer"]
+    await ctx.send(f"{riddle['emoji']}")
 
-    collector.on('end', collected => {
-      if (collected.size === 0) {
-        sentMessage.edit({ content: '⌛ انتهى الوقت! لم يتم اختيار أي شيء.', components: [] });
-      }
-    });
-  }
-});
+    def check(m):
+        return m.channel == ctx.channel and m.content.lower() == answer
 
-client.login(process.env.DISCORD_TOKEN);
+    try:
+        msg = await bot.wait_for('message', timeout=15.0, check=check)
+        user_id = str(msg.author.id)
+        points[user_id] = points.get(user_id, 0) + 1
+        await ctx.send(f"{msg.author.mention} صحيح! نقطة!")
+    except:
+        await ctx.send(f"انتهى الوقت! الجواب: {answer}")
+
+@bot.command()
+async def روليت(ctx):
+    await ctx.send("🎲 *لعبة الروليت:* سنختار فائز عشوائيًا الآن!")
+    players = [member for member in ctx.guild.members if not member.bot]
+    winner = random.choice(players)
+    user_id = str(winner.id)
+    points[user_id] = points.get(user_id, 0) + 1
+    await ctx.send(f"الروليت اختارت: {winner.mention}! نقطة!")
+
+@bot.command()
+async def مافيا(ctx):
+    await ctx.send("🎭 *لعبة المافيا:* سيتم توزيع أدوار على اللاعبين في الخاص، لا تفصح عن دورك!")
+    roles = ["مافيا", "شرطي", "مدني", "مدني"]
+    players = [member for member in ctx.guild.members if not member.bot]
+    selected = random.sample(players, min(len(players), len(roles)))
+    assigned = zip(selected, roles)
+    for member, role in assigned:
+        try:
+            await member.send(f"دورك في المافيا: {role}")
+        except:
+            await ctx.send(f"لا يمكن إرسال خاص لـ {member.mention}")
+    await ctx.send("تم توزيع الأدوار!")
+
+@bot.command()
+async def علم(ctx):
+    await ctx.send("🌍 *لعبة احزر العلم:* اكتب اسم الدولة لهذا العلم!")
+    flag = random.choice(flags)
+    answer = flag["answer"]
+    await ctx.send(flag["emoji"])
+
+    def check(m):
+        return m.channel == ctx.channel and m.content.lower() == answer
+
+    try:
+        msg = await bot.wait_for('message', timeout=15.0, check=check)
+        user_id = str(msg.author.id)
+        points[user_id] = points.get(user_id, 0) + 1
+        await ctx.send(f"{msg.author.mention} صحيح! نقطة!")
+    except:
+        await ctx.send(f"انتهى الوقت! الجواب: {answer}")
+
+@bot.command()
+async def سريع(ctx):
+    await ctx.send("⚡ *لعبة السرعة:* كن أول من يكتب الجملة التالية!")
+    sentence = random.choice(sentences)
+    await ctx.send(f"{sentence}")
+
+    def check(m):
+        return m.channel == ctx.channel and m.content == sentence
+
+    try:
+        msg = await bot.wait_for('message', timeout=15.0, check=check)
+        user_id = str(msg.author.id)
+        points[user_id] = points.get(user_id, 0) + 1
+        await ctx.send(f"{msg.author.mention} أسرع شخص! نقطة!")
+    except:
+        await ctx.send("انتهى الوقت! ولا أحد كتبها.")
+
+@bot.command()
+async def احسب(ctx, *, message):
+    await ctx.send("🔢 *احسب الأحرف:* سأخبرك بعدد الأحرف (بدون مسافات) في جملتك.")
+    count = len(message.replace(" ", ""))
+    await ctx.send(f"عدد الأحرف: {count}")
+
+@bot.command()
+async def متجر(ctx):
+    await ctx.send("""
+🛍️ *المتجر:*
+- شراء رول خاص: 90 نقطة
+اكتب الأمر !شراء لشراء الرول إذا عندك نقاط كافية!
+""")
+
+@bot.command()
+async def شراء(ctx):
+    user_id = str(ctx.author.id)
+    user_points = points.get(user_id, 0)
+    role_name = "VIP"
+
+    if user_points < 90:
+        await ctx.send(f"{ctx.author.mention} تحتاج 90 نقطة! نقاطك الحالية: {user_points}")
+        return
+
+    role = discord.utils.get(ctx.guild.roles, name=role_name)
+    if not role:
+        role = await ctx.guild.create_role(name=role_name)
+    
+    await ctx.author.add_roles(role)
+    points[user_id] -= 90
+    await ctx.send(f"{ctx.author.mention} مبروك! حصلت على رول *{role_name}* وتم خصم 90 نقطة!")
+
+bot.run('YOUR_BOT_TOKEN')
