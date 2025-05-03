@@ -1,11 +1,6 @@
+require('dotenv').config();
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
-require('dotenv').config(); // Laddar miljövariabler från .env fil
-
-const token = process.env.DISCORD_TOKEN; // Hämta Discord-token från miljövariabeln
-const quiz = JSON.parse(fs.readFileSync('quiz.json', 'utf8'));
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -14,19 +9,24 @@ const client = new Client({
   ]
 });
 
+const token = process.env.DISCORD_TOKEN;
+
+let playerPoints = {};
 let gameActive = false;
 let players = [];
 let playerHearts = {};
-let playerPoints = {}; // För poäng
 let currentPlayerIndex = 0;
-const maxPlayers = 15;
 const minPlayers = 3;
 
+// === Bot Ready ===
 client.once('ready', () => {
-  console.log('Bot is online!');
+  console.log(`Bot is online as ${client.user.tag}`);
 });
 
+// === Help Command ===
 client.on('messageCreate', async message => {
+  if (message.author.bot) return;
+
   if (message.content === '-مساعدة') {
     const helpEmbed = new EmbedBuilder()
       .setTitle('🕹️ قائمة الألعاب')
@@ -34,13 +34,9 @@ client.on('messageCreate', async message => {
       .addFields(
         { name: '💣 لعبة القنبلة', value: '`-بومب`' },
         { name: '⌨️ الكتابة السريعة', value: '`-كتابة`' },
-        { name: '🏳️ علم أي دولة؟', value: '`-علم`' },
-        { name: '🧠 ذاكرة الإيموجي', value: '`-ايموجي`' },
-        { name: '🔢 خمن الرقم', value: '`-رقم`' },
+        { name: '🔤 حروف', value: '`-حروف`' },
         { name: '🎭 صراحة أم تحدي', value: '`-صراحة`' },
         { name: '🕵️ من كتب هذه الرسالة؟', value: '`-من_كتب`' },
-        { name: '🎰 روليت', value: '`-روليت`' },
-        { name: '🔤 حروف', value: '`-حروف`' },
         { name: '💎 نقاطي', value: '`-نقاطي`' }
       )
       .setColor(0x00FFFF)
@@ -49,208 +45,133 @@ client.on('messageCreate', async message => {
     await message.channel.send({ embeds: [helpEmbed] });
   }
 
-  // نقاطي command (Show Player's Points)
+  // نقاطي
   if (message.content === '-نقاطي') {
-    if (playerPoints[message.author.id]) {
-      await message.channel.send(`📊 نقاطك هي: ${playerPoints[message.author.id]}`);
-    } else {
-      await message.channel.send('💡 لم تلعب أي لعبة بعد!');
-    }
+    const points = playerPoints[message.author.id] || 0;
+    await message.channel.send(`📊 نقاطك هي: ${points}`);
   }
 
-  // Bomb game logic
+  // لعبة القنبلة
   if (message.content === '-بومب' && !gameActive) {
     gameActive = true;
     players = [];
     playerHearts = {};
-    currentPlayerIndex = 0;
 
-    const joinButton = new ButtonBuilder()
-      .setCustomId('join_bomb_game')
-      .setLabel('انضم للعبة')
+    const joinBtn = new ButtonBuilder()
+      .setCustomId('join')
+      .setLabel('انضم')
       .setStyle(ButtonStyle.Success);
 
-    const leaveButton = new ButtonBuilder()
-      .setCustomId('leave_bomb_game')
-      .setLabel('غادر اللعبة')
+    const leaveBtn = new ButtonBuilder()
+      .setCustomId('leave')
+      .setLabel('غادر')
       .setStyle(ButtonStyle.Danger);
 
-    const row = new ActionRowBuilder()
-      .addComponents(joinButton, leaveButton);
+    const row = new ActionRowBuilder().addComponents(joinBtn, leaveBtn);
+    const embed = new EmbedBuilder()
+      .setTitle('💣 لعبة القنبلة بدأت!')
+      .setDescription('اضغط على زر الانضمام خلال 30 ثانية.')
+      .setColor(0xFF0000);
 
-    let embed = new EmbedBuilder()
-      .setTitle('بدء اللعبة!')
-      .setDescription('انقر على الأزرار للانضمام أو مغادرة اللعبة.')
-      .setColor(0x00FF00)
-      .addFields({ name: 'اللاعبين', value: 'لا يوجد لاعبون بعد', inline: true })
-      .setFooter({ text: 'الرجاء الانضمام خلال 30 ثواني' });
+    const msg = await message.channel.send({ embeds: [embed], components: [row] });
 
-    const gameMessage = await message.channel.send({ embeds: [embed], components: [row] });
+    const collector = msg.createMessageComponentCollector({ time: 30000 });
 
-    const filter = interaction => ['join_bomb_game', 'leave_bomb_game'].includes(interaction.customId);
-    const collector = gameMessage.createMessageComponentCollector({ filter, time: 30000 });
-
-    collector.on('collect', async interaction => {
-      if (interaction.customId === 'join_bomb_game') {
-        if (!players.includes(interaction.user.id)) {
-          players.push(interaction.user.id);
-          playerHearts[interaction.user.id] = 2;
-          await interaction.reply({ content: `${interaction.user.tag} انضم إلى اللعبة!`, ephemeral: true });
+    collector.on('collect', async i => {
+      if (i.customId === 'join') {
+        if (!players.includes(i.user.id)) {
+          players.push(i.user.id);
+          playerHearts[i.user.id] = 2;
+          await i.reply({ content: `✅ ${i.user.username} انضم`, ephemeral: true });
         } else {
-          await interaction.reply({ content: 'أنت بالفعل في اللعبة!', ephemeral: true });
+          await i.reply({ content: '❗ أنت بالفعل منضم', ephemeral: true });
         }
-      } else if (interaction.customId === 'leave_bomb_game') {
-        players = players.filter(id => id !== interaction.user.id);
-        delete playerHearts[interaction.user.id];
-        await interaction.reply({ content: `${interaction.user.tag} غادر اللعبة!`, ephemeral: true });
+      } else if (i.customId === 'leave') {
+        players = players.filter(p => p !== i.user.id);
+        delete playerHearts[i.user.id];
+        await i.reply({ content: '❌ غادرت اللعبة', ephemeral: true });
       }
     });
 
     collector.on('end', async () => {
       if (players.length >= minPlayers) {
-        await message.channel.send('اللعبة ستبدأ قريباً!');
-        setTimeout(() => {
-          startGame(message.channel);
-        }, 10000);
+        await message.channel.send('🚀 اللعبة تبدأ الآن!');
+        // Lägg till mer spellogik här om du vill
       } else {
         gameActive = false;
-        await message.channel.send(`تم إلغاء اللعبة بسبب قلة اللاعبين. يجب أن ينضم على الأقل ${minPlayers} لاعبين.`);
+        await message.channel.send('❌ تم إلغاء اللعبة لعدم وجود عدد كافٍ من اللاعبين.');
       }
     });
   }
 
-  // Stop bomb game
-  if (message.content === '-ايقاف' && gameActive) {
-    gameActive = false;
-    players = [];
-    playerHearts = {};
-    await message.channel.send('تم إيقاف اللعبة.');
-  }
-
-  // Roulette game
-  if (message.content === '-روليت') {
-    const choices = ['🎉 فزت!', '❌ خسرت!'];
-    const result = choices[Math.floor(Math.random() * choices.length)];
-    await message.channel.send(result);
-  }
-
-  // حروف game
-  if (message.content === '-حروف') {
-    const words = [
-      'برمجة', 'مطور', 'تعلم', 'دردشة', 'ذكاء', 'كود', 'نظام', 'خوارزمية', 'شيفرة', 'لغات'
-    ];
-
-    const randomWord = words[Math.floor(Math.random() * words.length)];
-    const wordLength = randomWord.length;
-
-    await message.channel.send(`هل يمكنك تخمين عدد الأحرف في الكلمة التالية؟ \n\n${randomWord}`);
-
-    const filter = response => response.author.id !== client.user.id && !isNaN(response.content);
-    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
-
-    collector.on('collect', (msg) => {
-      const guess = parseInt(msg.content);
-      if (guess === wordLength) {
-        msg.reply('أحسنت! لقد خمنت عدد الأحرف بشكل صحيح!');
-        collector.stop();
-      } else {
-        msg.reply('حاول مجدداً! عدد الأحرف غير صحيح.');
-      }
-    });
-
-    collector.on('end', collected => {
-      if (collected.size === 0) {
-        message.channel.send(`لم يتمكن أي شخص من الإجابة في الوقت المحدد! الكلمة كانت: ${randomWord} وعدد الأحرف هو: ${wordLength}`);
-      }
-    });
-  }
-
-  // Type Racer game
+  // كتابة
   if (message.content === '-كتابة') {
     const sentences = [
-      'هذا نص اختبار',
       'البرمجة ممتعة',
-      'تعلم البرمجة هو مهارة حياتية',
-      'الدردشة مع الروبوت ممتعة جداً!',
-      'أنا أحب البرمجة والألعاب!'
+      'الذكاء الاصطناعي مذهل',
+      'أنا أحب البوتات',
+      'جرب كتابة هذا النص'
     ];
+    const text = sentences[Math.floor(Math.random() * sentences.length)];
+    await message.channel.send(`📝 اكتب هذا بأسرع ما يمكن:\n\n${text}`);
 
-    const randomSentence = sentences[Math.floor(Math.random() * sentences.length)];
-
-    await message.channel.send(`أكتب هذه الجملة بأسرع ما يمكن: \n\n${randomSentence}`);
-
-    const filter = response => response.author.id !== client.user.id;
+    const filter = msg => msg.content === text && !msg.author.bot;
     const collector = message.channel.createMessageCollector({ filter, time: 30000 });
 
-    collector.on('collect', async (msg) => {
-      if (msg.content === randomSentence) {
-        await msg.reply('تهانينا! لقد كتبت الجملة بشكل صحيح.');
-        collector.stop();
-      }
+    collector.on('collect', msg => {
+      playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1;
+      msg.reply('✅ أحسنت!');
+      collector.stop();
     });
 
-    collector.on('end', collected => {
-      if (collected.size === 0) {
-        message.channel.send('لم يقم أحد بكتابة الجملة بشكل صحيح في الوقت المحدد!');
-      }
+    collector.on('end', c => {
+      if (c.size === 0) message.channel.send('⌛ لم يقم أحد بكتابة الجملة بشكل صحيح.');
     });
   }
 
-  // Truth or Dare game
+  // حروف
+  if (message.content === '-حروف') {
+    const words = ['ذكاء', 'برمجة', 'كود', 'شيفرة', 'خوارزمية'];
+    const chosen = words[Math.floor(Math.random() * words.length)];
+    await message.channel.send(`🤔 كم عدد أحرف هذه الكلمة؟\n\n${chosen}`);
+
+    const filter = msg => !isNaN(msg.content) && !msg.author.bot;
+    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
+
+    collector.on('collect', msg => {
+      if (parseInt(msg.content) === chosen.length) {
+        playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1;
+        msg.reply('✅ صحيح!');
+        collector.stop();
+      } else {
+        msg.reply('❌ خطأ، حاول مجددًا!');
+      }
+    });
+
+    collector.on('end', c => {
+      if (c.size === 0) message.channel.send(`⌛ انتهى الوقت! الكلمة كانت: ${chosen}`);
+    });
+  }
+
+  // صراحة أو تحدي
   if (message.content === '-صراحة') {
-    const options = ['صراحة', 'تحدي'];
-    const choice = options[Math.floor(Math.random() * options.length)];
+    const type = Math.random() > 0.5 ? 'صراحة' : 'تحدي';
+    const list = type === 'صراحة'
+      ? ['ما هو أكبر سر لك؟', 'هل تحب شخصاً؟', 'ما هو أكبر خوفك؟']
+      : ['أرسل رسالة غريبة', 'غيّر اسمك لمدة ساعة', 'قل نكتة سخيفة'];
 
-    if (choice === 'صراحة') {
-      const questions = [
-        'ما هو أكبر سر لديك؟',
-        'هل تحب شخصاً سراً؟',
-        'ما هو أكثر شيء تخاف منه؟',
-        'هل سبق لك أن كذبت على صديقك المقرب؟',
-        'من هو الشخص الذي تعجب به بشكل سرّي؟',
-        'هل سبق لك أن فعلت شيئاً غير قانوني؟'
-      ];
-
-      const question = questions[Math.floor(Math.random() * questions.length)];
-      await message.channel.send(`اختياري كان صراحة: \n\n${question}`);
-    } else {
-      const dares = [
-        'أرسل رسالة عشوائية لجميع أعضاء الخادم.',
-        'اطلب من شخص آخر تحديد شيء غريب لتفعله.',
-        'اتصل بشخص وأخبره أنك اشتريت طعاماً غريباً!',
-        'قم بكتابة جملة غريبة في المحادثة.',
-        'اطلب من شخص آخر أن يقوم بمشاركة صورة غريبة.'
-      ];
-
-      const dare = dares[Math.floor(Math.random() * dares.length)];
-      await message.channel.send(`اختياري كان تحدي: \n\n${dare}`);
-    }
+    const selected = list[Math.floor(Math.random() * list.length)];
+    await message.channel.send(`🎭 ${type}:\n\n${selected}`);
   }
 
-  // Who Wrote This Message game
+  // من كتب
   if (message.content === '-من_كتب') {
-    const members = message.guild.members.cache.filter(member => !member.user.bot).map(member => member.user.id);
-    const randomMemberId = members[Math.floor(Math.random() * members.length)];
-    const randomMember = await client.users.fetch(randomMemberId);
-
-    const messageToSend = await message.channel.send(`${randomMember.tag} كتب هذه الرسالة؟`);
-
-    const filter = response => response.author.id !== client.user.id;
-    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
-
-    collector.on('collect', async (msg) => {
-      if (msg.content.toLowerCase() === randomMember.tag.toLowerCase()) {
-        await msg.reply('أحسنت! لقد اكتشفت من كتب الرسالة.');
-        collector.stop();
-      }
-    });
-
-    collector.on('end', collected => {
-      if (collected.size === 0) {
-        message.channel.send(`انتهت الوقت! كانت الرسالة من: ${randomMember.tag}`);
-      }
-    });
+    const members = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
+    const random = members[Math.floor(Math.random() * members.length)];
+    await message.channel.send(`🤔 من كتب هذه الرسالة؟\n\n${random.username}`);
   }
 });
 
+// === Start Bot ===
 client.login(token);
+
