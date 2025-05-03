@@ -1,188 +1,209 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
+
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ],
-    partials: [Partials.Channel]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 const token = process.env.DISCORD_TOKEN;
 
-let playerPoints = new Map(); // Using Map for player points tracking
+let playerPoints = {};
 let gameActive = false;
 let players = [];
 let playerHearts = {};
 let currentPlayerIndex = 0;
 const minPlayers = 3;
-
-// Emoji riddles and flags for games
-const emojiRiddles = [
-    { emoji: '🍎📱', answer: 'ابل' },
-    { emoji: '🎬🍿', answer: 'سينما' },
-    { emoji: '🚗💨', answer: 'سيارة' },
-    { emoji: '🐍💻', answer: 'بايثون' },
-    { emoji: '☕💻', answer: 'قهوة' },
-];
-
-const flags = [
-    { emoji: '🇸🇦', answer: 'السعودية' },
-    { emoji: '🇪🇬', answer: 'مصر' },
-    { emoji: '🇯🇵', answer: 'اليابان' },
-    { emoji: '🇫🇷', answer: 'فرنسا' },
-];
-
-// Sentences for speed typing game
-const sentences = [
-    'انا احب البرمجة',
-    'ديسكورد ممتع',
-    'مرحبا بكم في السيرفر',
-    'اللعب مع الاصدقاء ممتع'
-];
+let guessingGameActive = false;
 
 client.once('ready', () => {
-    console.log(تم تسجيل الدخول باسم ${client.user.tag});
+  console.log(تم تسجيل الدخول باسم ${client.user.tag});
 });
 
 // === Help Command ===
 client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-    const args = message.content.trim().split(/ +/g);
-    const command = args.shift().toLowerCase();
+  if (message.author.bot) return;
 
-    // Display help
-    if (command === '-مساعدة') {
-        const helpEmbed = new EmbedBuilder()
-            .setTitle('🕹️ قائمة الألعاب')
-            .setDescription('استخدم الأوامر التالية للعب:')
-            .addFields(
-                { name: '💣 لعبة القنبلة', value: '-بومب' },
-                { name: '⌨️ الكتابة السريعة', value: '-كتابة' },
-                { name: '🔤 حروف', value: '-حروف' },
-                { name: '🎭 صراحة أم تحدي', value: '-صراحة' },
-                { name: '🕵️ من كتب هذه الرسالة؟', value: '-من_كتب' },
-                { name: '💎 نقاطي', value: '-نقاطي' },
-                { name: '!ترتيب', value: 'أفضل اللاعبين' },
-                { name: '!ايموجي', value: 'لعبة تخمين الإيموجي' },
-                { name: '!علم', value: 'احزر الدولة من العلم' },
-                { name: '!روليت', value: 'لعبة الروليت' },
-                { name: '!مافيا', value: 'لعبة المافيا' }
-            )
-            .setColor(0x00FFFF)
-            .setFooter({ text: 'استمتع باللعب!' });
+  if (message.content === '-مساعدة') {
+    const helpEmbed = new EmbedBuilder()
+      .setTitle('🕹️ قائمة الألعاب')
+      .setDescription('استخدم الأوامر التالية للعب:')
+      .addFields(
+        { name: '💣 لعبة القنبلة', value: '-بومب' },
+        { name: '⌨️ الكتابة السريعة', value: '-كتابة' },
+        { name: '🔤 حروف', value: '-حروف' },
+        { name: '🎭 صراحة أم تحدي', value: '-صراحة' },
+        { name: '🕵️ من كتب هذه الرسالة؟', value: '-من_كتب' },
+        { name: '🧩 لعبة الإيموجي', value: '-إيموجي' },
+        { name: '🎰 روليت', value: '-روليت' },
+        { name: '🕵️‍♂️ مافيا', value: '-مافيا' },
+        { name: '💸 المتجر (شراء رتبة)', value: '-متجر' },
+        { name: '💎 نقاطي', value: '-نقاطي' },
+        { name: '🎯 لعبة الأرقام', value: '-أرقام' }
+      )
+      .setColor(0x00FFFF)
+      .setFooter({ text: 'استمتع باللعب!' });
 
-        await message.channel.send({ embeds: [helpEmbed] });
-    }
+    await message.channel.send({ embeds: [helpEmbed] });
+  }
 
-    // Display user points
-    if (command === '-نقاطي') {
-        const points = playerPoints.get(message.author.id) || 0;
-        await message.channel.send(📊 نقاطك هي: ${points});
-    }
+  // نقاطي
+  if (message.content === '-نقاطي') {
+    const points = playerPoints[message.author.id] || 0;
+    await message.channel.send(📊 نقاطك هي: ${points});
+  }
 
-    // === Emoji Riddle ===
-    if (command === '!ايموجي') {
-        const riddle = emojiRiddles[Math.floor(Math.random() * emojiRiddles.length)];
-        message.channel.send(❓ **لعبة الإيموجي:** خمن الكلمة!\n${riddle.emoji});
+  // لعبة القنبلة
+  if (message.content === '-بومب' && !gameActive) {
+    gameActive = true;
+    players = [];
+    playerHearts = {};
 
-        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === riddle.answer;
-        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
-            .then(collected => {
-                const winner = collected.first().author;
-                playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
-                message.channel.send(${winner} صحيح! نقطة!);
-            })
-            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${riddle.answer}));
-    }
+    const joinBtn = new ButtonBuilder()
+      .setCustomId('join')
+      .setLabel('انضم')
+      .setStyle(ButtonStyle.Success);
 
-    // === Speed Typing ===
-    if (command === '-كتابة') {
-        const text = sentences[Math.floor(Math.random() * sentences.length)];
-        await message.channel.send(📝 اكتب هذا بأسرع ما يمكن:\n\n${text});
+    const leaveBtn = new ButtonBuilder()
+      .setCustomId('leave')
+      .setLabel('غادر')
+      .setStyle(ButtonStyle.Danger);
 
-        const filter = msg => msg.content === text && !msg.author.bot;
-        const collector = message.channel.createMessageCollector({ filter, time: 30000 });
+    const row = new ActionRowBuilder().addComponents(joinBtn, leaveBtn);
+    const embed = new EmbedBuilder()
+      .setTitle('💣 لعبة القنبلة بدأت!')
+      .setDescription('اضغط على زر الانضمام خلال 30 ثانية.')
+      .setColor(0xFF0000);
 
-        collector.on('collect', msg => {
-            playerPoints.set(msg.author.id, (playerPoints.get(msg.author.id) || 0) + 1);
-            msg.reply('✅ أحسنت!');
-            collector.stop();
-        });
+    const msg = await message.channel.send({ embeds: [embed], components: [row] });
 
-        collector.on('end', c => {
-            if (c.size === 0) message.channel.send('⌛ لم يقم أحد بكتابة الجملة بشكل صحيح.');
-        });
-    }
+    const collector = msg.createMessageComponentCollector({ time: 30000 });
 
-    // === Roulette Game ===
-    if (command === '!روليت') {
-        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
+    collector.on('collect', async i => {
+      if (i.customId === 'join') {
+        if (!players.includes(i.user.id)) {
+          players.push(i.user.id);
+          playerHearts[i.user.id] = 2;
+          await i.reply({ content: ✅ ${i.user.username} انضم, ephemeral: true });
+        } else {
+          await i.reply({ content: '❗ أنت بالفعل منضم', ephemeral: true });
+        }
+      } else if (i.customId === 'leave') {
+        players = players.filter(p => p !== i.user.id);
+        delete playerHearts[i.user.id];
+        await i.reply({ content: '❌ غادرت اللعبة', ephemeral: true });
+      }
+    });
+
+    collector.on('end', async () => {
+      if (players.length >= minPlayers) {
+        await message.channel.send('🚀 اللعبة تبدأ الآن!');
+        // هنا يمكن إضافة منطق اللعب و تحديد الفائز
+        // عند الفوز، إضافة نقطة للفائز
         const winner = players[Math.floor(Math.random() * players.length)];
-        playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
-        message.channel.send(الروليت اختارت: ${winner}! نقطة!);
+        playerPoints[winner] = (playerPoints[winner] || 0) + 1; // إضافة نقطة للفائز
+        await message.channel.send(<@${winner}> فاز في لعبة القنبلة! حصل على نقطة.);
+        gameActive = false;
+      } else {
+        gameActive = false;
+        await message.channel.send('❌ تم إلغاء اللعبة لعدم وجود عدد كافٍ من اللاعبين.');
+      }
+    });
+  }
+
+  // لعبة الإيموجي
+  if (message.content === '-إيموجي') {
+    const emojis = ['😀', '😂', '😎', '😍', '😢', '😡', '😱', '🤔'];
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+    await message.channel.send(🧩 حدد الإيموجي: ${randomEmoji});
+
+    const filter = msg => msg.content === randomEmoji && !msg.author.bot;
+    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
+
+    collector.on('collect', msg => {
+      playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1; // إضافة نقطة عند الفوز
+      msg.reply('✅ أحسنت في اختيار الإيموجي!');
+      collector.stop();
+    });
+
+    collector.on('end', c => {
+      if (c.size === 0) message.channel.send('⌛ انتهى الوقت دون أن يجيب أحد.');
+    });
+  }
+
+  // شراء رتبة
+  if (message.content === '-متجر') {
+    const points = playerPoints[message.author.id] || 0;
+
+    if (points >= 90) {
+      // هنا يمكنك إضافة كود لمنح اللاعب رتبة معينة في السيرفر
+      playerPoints[message.author.id] -= 90;
+      await message.channel.send(🎉 تم شراء الرتبة بنجاح! لديك الآن ${playerPoints[message.author.id]} نقطة.);
+    } else {
+      await message.channel.send(❌ لديك ${points} نقطة، تحتاج إلى 90 نقطة لشراء الرتبة.);
+    }
+  }
+
+  // روليت
+  if (message.content === '-روليت') {
+    const outcomes = ['💰 فزت بـ 50 نقطة!', '🎉 فزت بـ 100 نقطة!', '❌ خسرنا! حاول مجددًا!', '💸 فزت بـ 200 نقطة!'];
+    const randomOutcome = outcomes[Math.floor(Math.random() * outcomes.length)];
+
+    if (randomOutcome.includes('فزت')) {
+      const pointsToAdd = parseInt(randomOutcome.split(' ')[2]);
+      playerPoints[message.author.id] = (playerPoints[message.author.id] || 0) + pointsToAdd; // إضافة نقاط عند الفوز
     }
 
-    // === Mafia Game ===
-    if (command === '!مافيا') {
-        const roles = ['مافيا', 'شرطي', 'مدني', 'مدني'];
-        const players = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
-        const selected = players.sort(() => 0.5 - Math.random()).slice(0, roles.length);
-        selected.forEach((player, i) => {
-            player.send(دورك في المافيا: ${roles[i]}).catch(() => message.channel.send(لا يمكن إرسال خاص لـ ${player}));
-        });
-        message.channel.send('تم توزيع الأدوار!');
-    }
+    await message.channel.send(randomOutcome);
+  }
 
-    // === Flag Guessing Game ===
-    if (command === '!علم') {
-        const flag = flags[Math.floor(Math.random() * flags.length)];
-        message.channel.send(🌍 **احزر الدولة:**\n${flag.emoji});
+  // لعبة الأرقام
+  if (message.content === '-أرقام' && !guessingGameActive) {
+    guessingGameActive = true;
+    const randomNumber = Math.floor(Math.random() * 100) + 1; // رقم عشوائي من 1 إلى 100
 
-        const filter = m => m.channel.id === message.channel.id && m.content.toLowerCase() === flag.answer;
-        message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] })
-            .then(collected => {
-                const winner = collected.first().author;
-                playerPoints.set(winner.id, (playerPoints.get(winner.id) || 0) + 1);
-                message.channel.send(${winner} صحيح! نقطة!);
-            })
-            .catch(() => message.channel.send(انتهى الوقت! الجواب: ${flag.answer}));
-    }
+    const filter = msg => !msg.author.bot && !isNaN(msg.content) && parseInt(msg.content) >= 1 && parseInt(msg.content) <= 100;
 
-    // === Help Command ===
-    if (command === '!مساعدة') {
-        message.channel.send(`
-أوامر البوت:
-!نقاطي → اعرف نقاطك
-!ترتيب → أفضل اللاعبين
-!ايموجي → لعبة تخمين الإيموجي
-!روليت → لعبة الروليت
-!مافيا → توزيع أدوار المافيا
-!علم → احزر اسم الدولة من العلم
-!سريع → اكتب الجملة بسرعة
-!احسب → عد الأحرف في الجملة
-!متجر → فتح المتجر
-!شراء → شراء رول خاص
-        `);
-    }
+    await message.channel.send('🎯 لعبة الأرقام بدأت! حدد رقم بين 1 و 100!');
+    
+    const collector = message.channel.createMessageCollector({ filter, time: 30000 });
 
-    // === Player Points Ranking ===
-    if (command === '!ترتيب') {
-        const sorted = Array.from(playerPoints.entries()).sort((a, b) => b[1] - a[1]);
-        if (!sorted.length) {
-            message.channel.send('لا توجد نقاط حتى الآن!');
-            return;
-        }
-        let msg = '🏆 الترتيب:\n';
-        for (const [userId, score] of sorted.slice(0, 5)) {
-            const user = await client.users.fetch(userId);
-            msg += ${user.username}: ${score} نقطة\n;
-        }
-        message.channel.send(msg);
+    collector.on('collect', msg => {
+      const guess = parseInt(msg.content);
+      if (guess === randomNumber) {
+        playerPoints[msg.author.id] = (playerPoints[msg.author.id] || 0) + 1; // إضافة نقطة عند الفوز
+        msg.reply(🎉 أحسنت! الرقم كان ${randomNumber}! حصلت على نقطة.);
+        collector.stop();
+      }
+    });
+
+    collector.on('end', c => {
+      if (c.size === 0) {
+        message.channel.send('⌛ انتهى الوقت دون أن يخمن أحد الرقم.');
+      }
+      guessingGameActive = false;
+    });
+  }
+
+  // مافيا
+  if (message.content === '-مافيا') {
+    const roles = ['مافيا', 'ضحية', 'محقق'];
+    const playerRole = roles[Math.floor(Math.random() * roles.length)];
+    await message.channel.send(🎭 دورك في لعبة المافيا هو: ${playerRole});
+
+    // إذا كان اللاعب مافيا، يفوز ويحصل على نقطة
+    if (playerRole === 'مافيا') {
+      playerPoints[message.author.id] = (playerPoints[message.author.id] || 0) + 1; // إضافة نقطة للفائز
+      await message.channel.send(🎉 أنت المافيا وفزت في اللعبة! حصلت على نقطة.);
     }
+  }
+
+  // من كتب
+  if (message.content === '-من_كتب') {
+    const members = message.guild.members.cache.filter(m => !m.user.bot).map(m => m.user);
+    const random = members[Math.floor(Math.random() * members.length)];
+    await message.channel.send(🤔 من كتب هذه الرسالة؟\n\n${random.username});
+  }
 });
 
 // === Start Bot ===
