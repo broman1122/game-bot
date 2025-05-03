@@ -165,5 +165,5 @@ client.on('messageCreate', async message => {
         message.channel.send(${message.author} مبروك! حصلت على رول **${roleName}** وتم خصم 90 نقطة!);
     }
 });
-
-client.login(process.env.BOT_TOKEN);
+const token = process.env.DISCORD_TOKEN;
+client.login(token);
