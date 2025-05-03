@@ -235,3 +235,5 @@ client.on('messageCreate', async message => {
 
     const filter = response => response.author.id !== client.user.id;
     const collector = message.channel.createMessageCollector({ filter, time: 300
+
+                                                              
