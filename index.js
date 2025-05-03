@@ -1,14 +1,10 @@
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
-const { token } = require('./config'); // Här ska du ha din token i config.js
-let quiz = {};
+require('dotenv').config(); // Laddar miljövariabler från .env fil
 
-try {
-  quiz = JSON.parse(fs.readFileSync('quiz.json', 'utf8'));
-} catch (err) {
-  console.error('Fel vid laddning av quiz.json:', err);
-}
+const token = process.env.DISCORD_TOKEN; // Hämta Discord-token från miljövariabeln
+const quiz = JSON.parse(fs.readFileSync('quiz.json', 'utf8'));
 
 const client = new Client({
   intents: [
@@ -31,7 +27,6 @@ client.once('ready', () => {
 });
 
 client.on('messageCreate', async message => {
-  // Help command
   if (message.content === '-مساعدة') {
     const helpEmbed = new EmbedBuilder()
       .setTitle('🕹️ قائمة الألعاب')
@@ -243,20 +238,19 @@ client.on('messageCreate', async message => {
     const filter = response => response.author.id !== client.user.id;
     const collector = message.channel.createMessageCollector({ filter, time: 30000 });
 
-    collector.on('collect', (msg) => {
-      if (msg.content === randomMember.tag) {
-        msg.reply('أحسنت! لقد كتبت الإجابة الصحيحة.');
+    collector.on('collect', async (msg) => {
+      if (msg.content.toLowerCase() === randomMember.tag.toLowerCase()) {
+        await msg.reply('أحسنت! لقد اكتشفت من كتب الرسالة.');
         collector.stop();
       }
     });
 
     collector.on('end', collected => {
       if (collected.size === 0) {
-        message.channel.send('لم يتمكن أحد من الإجابة في الوقت المحدد!');
+        message.channel.send(`انتهت الوقت! كانت الرسالة من: ${randomMember.tag}`);
       }
     });
   }
 });
 
-// Log in to Discord with your app's token
 client.login(token);
